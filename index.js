@@ -23,21 +23,19 @@ Location: Sydney, Australia
 `;
 
 const SEARCH_QUERIES = [
-  "AI consulting analyst",
-  "customer success manager AI SaaS",
-  "professional services consultant technology",
-  "data AI graduate program",
+  "AI consulting analyst OR customer success AI SaaS Sydney",
+  "professional services consultant OR data AI graduate Sydney",
 ];
 
-async function searchIndeedJobs(query) {
+async function searchJobs(query) {
   console.log(`Searching for: "${query}"...`);
   const response = await client.messages.create({
     model: "claude-sonnet-4-20250514",
-    max_tokens: 1000,
+    max_tokens: 800,
     messages: [
       {
         role: "user",
-        content: `Search for "${query}" jobs in Sydney Australia posted in the last 7 days on Seek, Indeed or LinkedIn. Return a plain text list of results including: job title, company, location, salary if listed, and the URL. List as many as you can find.`,
+        content: `Search for "${query}" jobs in Sydney Australia posted in the last 7 days on Seek or Indeed. Return a plain text list with: job title, company, location, salary if listed, and URL. List up to 8 results.`,
       },
     ],
     tools: [{ type: "web_search_20250305", name: "web_search" }],
@@ -149,9 +147,12 @@ async function main() {
 
   const rawResults = [];
   for (const query of SEARCH_QUERIES) {
-    const result = await searchIndeedJobs(query);
+    const result = await searchJobs(query);
     rawResults.push(result);
-    await new Promise((r) => setTimeout(r, 1500));
+    if (SEARCH_QUERIES.indexOf(query) < SEARCH_QUERIES.length - 1) {
+      console.log("Waiting 75 seconds to avoid rate limit...");
+      await new Promise((r) => setTimeout(r, 75000));
+    }
   }
 
   const combined = rawResults.filter(Boolean).join("\n\n---\n\n");
