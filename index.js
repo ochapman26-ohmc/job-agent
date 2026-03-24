@@ -23,38 +23,55 @@ Location: Sydney, Australia
 `;
 
 const SEARCH_QUERIES = [
-  "AI consulting analyst Sydney",
-  "customer success manager AI SaaS Sydney",
-  "professional services consultant technology Sydney",
-  "data AI graduate program Sydney",
+  "AI consulting analyst",
+  "customer success manager AI SaaS",
+  "professional services consultant technology",
+  "data AI graduate program",
 ];
 
 async function searchIndeedJobs(query) {
   console.log(`Searching Indeed: "${query}"...`);
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 1000,
-    messages: [
-      {
-        role: "user",
-        content: `Search Indeed for jobs matching: "${query}" in Sydney, Australia. Full-time roles. Find the most relevant current openings and list all results.`,
-      },
-    ],
-    mcp_servers: [
-      { type: "url", url: "https://mcp.indeed.com/claude/mcp", name: "indeed" },
-    ],
+  const encoded = encodeURIComponent(query);
+  const url = `https://au.indeed.com/jobs?q=${encoded}&l=Sydney%2C+NSW&jt=fulltime&fromage=7&limit=15`;
+
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept-Language": "en-AU,en;q=0.9",
+      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    },
   });
 
-  const text = response.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("\n");
-  const toolResults = response.content
-    .filter((b) => b.type === "mcp_tool_result")
-    .map((b) => b.content?.[0]?.text || "")
-    .join("\n");
+  const html = await res.text();
 
-  return text + "\n" + toolResults;
+  const match = html.match(/window\.mosaic\.providerData\["mosaic-provider-jobcards"\]\s*=\s*(\{.+?\});/s);
+  if (!match) {
+    console.log(`No structured data found for "${query}", skipping.`);
+    return "";
+  }
+
+  let data;
+  try {
+    data = JSON.parse(match[1]);
+  } catch (e) {
+    console.log(`Failed to parse data for "${query}": ${e.message}`);
+    return "";
+  }
+
+  const jobs = data?.metaData?.mosaicProviderJobCardsModel?.results || [];
+  if (!jobs.length) {
+    console.log(`No jobs found for "${query}".`);
+    return "";
+  }
+
+  return jobs.map((job) => `
+Title: ${job.displayTitle || job.title}
+Company: ${job.company}
+Location: ${job.formattedLocation}
+Salary: ${job.extractedSalary ? `${job.extractedSalary.min}-${job.extractedSalary.max} ${job.extractedSalary.type}` : "Not specified"}
+Snippet: ${job.snippet}
+URL: https://au.indeed.com/viewjob?jk=${job.jobkey}
+  `).join("\n---\n");
 }
 
 async function rankAndFormatJobs(allJobsRaw) {
@@ -90,9 +107,7 @@ function scoreColor(score) {
 }
 
 function buildEmailHtml(jobs, date) {
-  const jobCards = jobs
-    .map(
-      (job) => `
+  const jobCards = jobs.map((job) => `
     <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:18px 20px;margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
         <div>
@@ -105,46 +120,33 @@ function buildEmailHtml(jobs, date) {
       </div>
       <div style="font-size:13px;color:#475569;margin-bottom:10px;line-height:1.5;">${job.summary}</div>
       <div style="margin-bottom:12px;">
-        ${job.matchReasons
-          .map(
-            (r) =>
-              `<span style="display:inline-block;font-size:11px;background:#e0e7ff;color:#4338ca;border-radius:20px;padding:2px 10px;margin-right:6px;margin-bottom:4px;">${r}</span>`
-          )
-          .join("")}
+        ${job.matchReasons.map((r) => `<span style="display:inline-block;font-size:11px;background:#e0e7ff;color:#4338ca;border-radius:20px;padding:2px 10px;margin-right:6px;margin-bottom:4px;">${r}</span>`).join("")}
       </div>
       <a href="${job.applyUrl}" style="display:inline-block;background:#6366f1;color:#fff;font-size:13px;font-weight:500;padding:8px 16px;border-radius:7px;text-decoration:none;">
         View role
       </a>
     </div>
-  `
-    )
-    .join("");
+  `).join("");
 
   return `
 <!DOCTYPE html>
 <html>
 <body style="margin:0;padding:0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;background:#f1f5f9;">
   <div style="max-width:600px;margin:32px auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-    
     <div style="background:#0f172a;padding:28px 32px;">
       <div style="font-size:11px;color:#6366f1;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">Job Search Agent</div>
       <div style="font-size:22px;font-weight:700;color:#f8fafc;">Today's digest</div>
       <div style="font-size:13px;color:#475569;margin-top:4px;">${date} &nbsp;·&nbsp; ${jobs.length} roles ranked by fit</div>
     </div>
-
-    <div style="padding:24px 32px;">
-      ${jobCards}
-    </div>
-
+    <div style="padding:24px 32px;">${jobCards}</div>
     <div style="padding:16px 32px 24px;border-top:1px solid #e2e8f0;">
       <div style="font-size:11px;color:#94a3b8;">
-        Generated by your job search agent &nbsp;·&nbsp; Indeed MCP + Claude API &nbsp;·&nbsp; Oliver Chapman 2026
+        Generated by your job search agent &nbsp;·&nbsp; Indeed + Claude API &nbsp;·&nbsp; Oliver Chapman 2026
       </div>
     </div>
   </div>
 </body>
-</html>
-  `;
+</html>`;
 }
 
 async function sendEmail(html, jobCount) {
@@ -170,26 +172,35 @@ async function sendEmail(html, jobCount) {
 async function main() {
   console.log("Job agent starting...");
 
-  // Search all queries in parallel
-  const rawResults = await Promise.all(SEARCH_QUERIES.map(searchIndeedJobs));
-  const combined = rawResults.join("\n\n---\n\n");
+  const rawResults = [];
+  for (const query of SEARCH_QUERIES) {
+    const result = await searchIndeedJobs(query);
+    rawResults.push(result);
+    await new Promise((r) => setTimeout(r, 1500));
+  }
 
-  // Rank and deduplicate
+  const combined = rawResults.filter(Boolean).join("\n\n---\n\n");
+
+  if (!combined.trim()) {
+    console.log("No job data retrieved. Indeed may have blocked the request. Exiting.");
+    process.exit(0);
+  }
+
   const jobs = await rankAndFormatJobs(combined);
 
   if (!jobs.length) {
-    console.log("No jobs found or ranking failed. Exiting.");
+    console.log("No jobs ranked. Exiting.");
     process.exit(0);
   }
 
   console.log(`Found ${jobs.length} ranked jobs.`);
 
-  // Build and send email
   const date = new Date().toLocaleDateString("en-AU", {
     weekday: "long",
     day: "numeric",
     month: "long",
   });
+
   const html = buildEmailHtml(jobs, date);
   await sendEmail(html, jobs.length);
 
