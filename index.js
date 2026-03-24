@@ -27,19 +27,37 @@ const SEARCH_QUERIES = [
   "professional services consultant OR data AI graduate Sydney",
 ];
 
+async function callWithRetry(fn, label) {
+  while (true) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err.status === 429) {
+        const retryAfter = parseInt(err.headers?.["retry-after"] || "60", 10);
+        console.log(`Rate limit hit on "${label}". Waiting ${retryAfter + 5}s...`);
+        await new Promise((r) => setTimeout(r, (retryAfter + 5) * 1000));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 async function searchJobs(query) {
   console.log(`Searching for: "${query}"...`);
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 800,
-    messages: [
-      {
-        role: "user",
-        content: `Search for "${query}" jobs in Sydney Australia posted in the last 7 days on Seek or Indeed. Return a plain text list with: job title, company, location, salary if listed, and URL. List up to 8 results.`,
-      },
-    ],
-    tools: [{ type: "web_search_20250305", name: "web_search" }],
-  });
+  const response = await callWithRetry(() =>
+    client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 600,
+      messages: [
+        {
+          role: "user",
+          content: `Search for "${query}" jobs in Sydney Australia posted in the last 7 days. Return a plain text list with: job title, company, location, salary if listed, and URL. List up to 6 results only.`,
+        },
+      ],
+      tools: [{ type: "web_search_20250305", name: "web_search" }],
+    }), query
+  );
 
   return response.content
     .filter((b) => b.type === "text")
@@ -49,17 +67,19 @@ async function searchJobs(query) {
 
 async function rankAndFormatJobs(allJobsRaw) {
   console.log("Ranking jobs against profile...");
-  const response = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 1000,
-    system: `You are a career advisor. Return ONLY valid JSON, no markdown, no backticks. Candidate profile:\n${OLIVER_PROFILE}`,
-    messages: [
-      {
-        role: "user",
-        content: `Here are job listings:\n\n${allJobsRaw}\n\nScore each job 1-10 for fit. Return a JSON array of the top 8 jobs with fields: title, company, location, salary (or "Not specified"), matchScore (1-10), matchReasons (array of 2 short strings), applyUrl (if available, else "#"), summary (1 sentence). Sort by matchScore descending. Only include roles scoring 5 or above.`,
-      },
-    ],
-  });
+  const response = await callWithRetry(() =>
+    client.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      system: `You are a career advisor. Return ONLY valid JSON, no markdown, no backticks. Candidate profile:\n${OLIVER_PROFILE}`,
+      messages: [
+        {
+          role: "user",
+          content: `Here are job listings:\n\n${allJobsRaw}\n\nScore each job 1-10 for fit. Return a JSON array of the top 8 jobs with fields: title, company, location, salary (or "Not specified"), matchScore (1-10), matchReasons (array of 2 short strings), applyUrl (if available, else "#"), summary (1 sentence). Sort by matchScore descending. Only include roles scoring 5 or above.`,
+        },
+      ],
+    }), "ranking"
+  );
 
   const raw = response.content.find((b) => b.type === "text")?.text || "[]";
   try {
@@ -150,8 +170,8 @@ async function main() {
     const result = await searchJobs(query);
     rawResults.push(result);
     if (SEARCH_QUERIES.indexOf(query) < SEARCH_QUERIES.length - 1) {
-      console.log("Waiting 75 seconds to avoid rate limit...");
-      await new Promise((r) => setTimeout(r, 75000));
+      console.log("Pausing between searches...");
+      await new Promise((r) => setTimeout(r, 65000));
     }
   }
 
