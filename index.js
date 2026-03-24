@@ -66,11 +66,13 @@ async function searchJobs(query) {
 }
 
 async function rankAndFormatJobs(allJobsRaw) {
+  console.log("Waiting 65s before ranking to clear rate limit...");
+  await new Promise((r) => setTimeout(r, 65000));
   console.log("Ranking jobs against profile...");
   const response = await callWithRetry(() =>
     client.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
+      max_tokens: 2000,
       system: `You are a career advisor. Return ONLY valid JSON, no markdown, no backticks. Candidate profile:\n${OLIVER_PROFILE}`,
       messages: [
         {
@@ -89,6 +91,7 @@ async function rankAndFormatJobs(allJobsRaw) {
     return JSON.parse(clean.slice(start, end + 1));
   } catch (e) {
     console.error("Failed to parse job rankings:", e.message);
+    console.error("Raw response:", raw.slice(0, 500));
     return [];
   }
 }
