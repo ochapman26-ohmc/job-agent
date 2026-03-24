@@ -43,6 +43,9 @@ async function searchIndeedJobs(query) {
     mcp_servers: [
       { type: "url", url: "https://mcp.indeed.com/claude/mcp", name: "indeed" }
     ],
+    tools: [
+      { type: "mcp_toolset", mcp_server_name: "indeed" }
+    ],
     betas: ["mcp-client-2025-11-20"],
   });
 
